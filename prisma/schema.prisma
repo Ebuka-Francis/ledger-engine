@@ -1,0 +1,149 @@
+generator client {
+  provider        = "prisma-client"
+  output          = "../generated/prisma"
+  previewFeatures = ["partialIndexes"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model accounts {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id      String       @db.Uuid
+  code           String
+  name           String
+  type           account_type
+  currency       String       @db.Char(3)
+  allow_negative Boolean      @default(true)
+  created_at     DateTime     @default(now()) @db.Timestamptz(6)
+  tenants        tenants      @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  entries        entries[]
+
+  @@unique([tenant_id, code])
+  @@unique([tenant_id, id, currency])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model entries {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id      String          @db.Uuid
+  transaction_id String          @db.Uuid
+  account_id     String          @db.Uuid
+  direction      entry_direction
+  amount         BigInt
+  currency       String          @db.Char(3)
+  created_at     DateTime        @default(now()) @db.Timestamptz(6)
+  accounts       accounts        @relation(fields: [tenant_id, account_id, currency], references: [tenant_id, id, currency], onDelete: NoAction, onUpdate: NoAction)
+  transactions   transactions    @relation(fields: [tenant_id, transaction_id], references: [tenant_id, id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id, account_id], map: "entries_account_idx")
+  @@index([transaction_id], map: "entries_transaction_idx")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model tenants {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String
+  created_at        DateTime            @default(now()) @db.Timestamptz(6)
+  accounts          accounts[]
+  api_keys          api_keys[]
+  transactions      transactions[]
+  webhook_endpoints webhook_endpoints[]
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model transactions {
+  id                      String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id               String           @db.Uuid
+  idempotency_key         String
+  description             String?
+  metadata                Json             @default("{}")
+  reverses_transaction_id String?          @db.Uuid
+  posted_at               DateTime         @default(now()) @db.Timestamptz(6)
+  created_at              DateTime         @default(now()) @db.Timestamptz(6)
+  entries                 entries[]
+  tenants                 tenants          @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transactions            transactions?    @relation("transactionsTotransactions", fields: [tenant_id, reverses_transaction_id], references: [tenant_id, id], onDelete: NoAction, onUpdate: NoAction)
+  other_transactions      transactions[]   @relation("transactionsTotransactions")
+  webhook_events          webhook_events[]
+
+  @@unique([tenant_id, id])
+  @@unique([tenant_id, idempotency_key])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model webhook_endpoints {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id      String           @db.Uuid
+  provider       String
+  secret         String
+  active         Boolean          @default(true)
+  created_at     DateTime         @default(now()) @db.Timestamptz(6)
+  tenants        tenants          @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  webhook_events webhook_events[]
+
+  @@unique([tenant_id, id])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model webhook_events {
+  id                String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id         String               @db.Uuid
+  endpoint_id       String               @db.Uuid
+  provider          String
+  provider_event_id String
+  event_type        String
+  raw_body          String
+  payload           Json
+  headers           Json                 @default("{}")
+  status            webhook_event_status @default(received)
+  attempts          Int                  @default(0)
+  next_attempt_at   DateTime             @default(now()) @db.Timestamptz(6)
+  last_error        String?
+  transaction_id    String?              @db.Uuid
+  received_at       DateTime             @default(now()) @db.Timestamptz(6)
+  processed_at      DateTime?            @db.Timestamptz(6)
+  webhook_endpoints webhook_endpoints    @relation(fields: [tenant_id, endpoint_id], references: [tenant_id, id], onDelete: NoAction, onUpdate: NoAction)
+  transactions      transactions?        @relation(fields: [tenant_id, transaction_id], references: [tenant_id, id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([tenant_id, provider, provider_event_id])
+  @@index([next_attempt_at], map: "webhook_events_due_idx", where: raw("(status = ANY (ARRAY['received'::webhook_event_status, 'failed'::webhook_event_status]))"))
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model api_keys {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id  String    @db.Uuid
+  name       String
+  key_prefix String
+  key_hash   String    @unique
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  revoked_at DateTime? @db.Timestamptz(6)
+  tenants    tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "api_keys_tenant_idx")
+}
+
+enum account_type {
+  asset
+  liability
+  equity
+  revenue
+  expense
+}
+
+enum entry_direction {
+  debit
+  credit
+}
+
+enum webhook_event_status {
+  received
+  processing
+  processed
+  failed
+  dead
+}
