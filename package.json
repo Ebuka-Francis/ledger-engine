@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "tsx --test tests/*.test.ts",
-    "start": "node api.js && tsx server.ts",
+    "start": "node init && tsx server.ts",
     "worker": "tsx worker.ts",
     "demo": "tsx scripts/demo.ts"
   },
